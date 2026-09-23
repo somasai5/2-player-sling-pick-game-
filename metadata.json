@@ -1,0 +1,6 @@
+{
+  "name": "Timber Strike - 2-Player Sling Puck",
+  "description": "An authentic fast wooden sling-puck table board game inspired by Super Player and Passe-Trappe. Features physical center divider with central pass slot, elastic slingshot bands, rapid multi-touch firing, realistic wooden physics, and online P2P multiplayer.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

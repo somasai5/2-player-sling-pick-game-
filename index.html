@@ -1,0 +1,2572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Timber Strike - 2-Player Sling Puck</title>
+  <meta name="description" content="An authentic fast wooden sling-puck table board game inspired by Super Player and Passe-Trappe. Features physical center divider with central pass slot, elastic slingshot bands, rapid multi-touch firing, realistic wooden physics, and online P2P multiplayer." />
+  <meta property="og:title" content="Timber Strike - 2-Player Sling Puck" />
+  <meta property="og:description" content="An authentic fast wooden sling-puck table board game inspired by Super Player and Passe-Trappe. Features physical center divider with central pass slot, elastic slingshot bands, rapid multi-touch firing, realistic wooden physics, and online P2P multiplayer." />
+  <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary_large_image" />
+
+  <!-- PeerJS CDN for WebRTC P2P DataConnection -->
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #16100c;
+      background-image: radial-gradient(circle at center, #291d16 0%, #110c08 100%);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      color: #f7eedf;
+      touch-action: none;
+    }
+
+    #app-viewport {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow: hidden;
+    }
+
+    #game-canvas {
+      display: block;
+      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.05);
+      touch-action: none;
+      cursor: grab;
+      border-radius: 4px;
+      transition: max-width 0.25s cubic-bezier(0.2, 0.8, 0.2, 1), max-height 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+
+    #game-canvas.is-portrait {
+      width: 100%;
+      height: 100%;
+      max-width: calc(100vh * 0.5);
+      max-height: 100vh;
+      aspect-ratio: 1 / 2;
+      object-fit: contain;
+    }
+
+    #game-canvas.is-landscape {
+      width: 100%;
+      height: 100%;
+      max-width: calc(100vw - 32px);
+      max-height: calc((100vw - 32px) * 0.5);
+      aspect-ratio: 2 / 1;
+      object-fit: contain;
+    }
+
+    @media (min-aspect-ratio: 2/1) {
+      #game-canvas.is-landscape {
+        max-height: calc(100vh - 32px);
+        max-width: calc((100vh - 32px) * 2);
+      }
+    }
+
+    #game-canvas:active {
+      cursor: grabbing;
+    }
+
+    /* Top Floating HUD */
+    .hud-header {
+      position: absolute;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 92%;
+      max-width: 560px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      pointer-events: none;
+      z-index: 20;
+      transition: max-width 0.25s ease;
+    }
+
+    .hud-header.landscape {
+      max-width: 920px;
+    }
+
+    .hud-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      background: rgba(22, 16, 12, 0.88);
+      border: 1px solid rgba(212, 163, 115, 0.35);
+      border-radius: 9999px;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      color: #f3e5d0;
+      backdrop-filter: blur(8px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+      pointer-events: auto;
+    }
+
+    .hud-controls {
+      display: flex;
+      gap: 8px;
+      pointer-events: auto;
+    }
+
+    .hud-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 38px;
+      height: 38px;
+      background: rgba(30, 22, 16, 0.88);
+      border: 1px solid rgba(212, 163, 115, 0.4);
+      border-radius: 50%;
+      color: #f7eedf;
+      cursor: pointer;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.45);
+      transition: transform 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+    }
+
+    .hud-btn:hover {
+      background: rgba(54, 40, 30, 0.95);
+      border-color: #d4a373;
+      transform: scale(1.06);
+    }
+
+    .hud-btn:active {
+      transform: scale(0.95);
+    }
+
+    .hud-btn svg {
+      width: 18px;
+      height: 18px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    /* Modal / Dialog Overlays */
+    .overlay-screen {
+      position: absolute;
+      inset: 0;
+      background: rgba(14, 10, 8, 0.84);
+      backdrop-filter: blur(10px);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+      z-index: 50;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.22s ease;
+    }
+
+    .overlay-screen.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .card-dialog {
+      background: linear-gradient(165deg, #322319 0%, #1f1610 100%);
+      border: 2px solid #8e623f;
+      border-radius: 20px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.85), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+      width: 100%;
+      max-width: 440px;
+      padding: 28px 24px;
+      text-align: center;
+      position: relative;
+    }
+
+    .dialog-title {
+      font-size: 26px;
+      font-weight: 800;
+      letter-spacing: 1px;
+      color: #faebd7;
+      text-transform: uppercase;
+      text-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+      margin-bottom: 8px;
+    }
+
+    .dialog-subtitle {
+      font-size: 14px;
+      color: #d1b89d;
+      margin-bottom: 22px;
+      line-height: 1.5;
+    }
+
+    .menu-options {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .btn-wood {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      width: 100%;
+      padding: 13px 18px;
+      border-radius: 12px;
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      cursor: pointer;
+      border: none;
+      transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+    }
+
+    .btn-wood-primary {
+      background: linear-gradient(180deg, #d4a373 0%, #a97142 100%);
+      color: #23170e;
+      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+    }
+
+    .btn-wood-primary:hover {
+      filter: brightness(1.08);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
+    }
+
+    .btn-wood-secondary {
+      background: rgba(50, 36, 26, 0.9);
+      border: 1px solid #7c5435;
+      color: #faebd7;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+    }
+
+    .btn-wood-secondary:hover {
+      background: rgba(70, 50, 36, 0.95);
+      border-color: #a97142;
+      transform: translateY(-1px);
+    }
+
+    .btn-wood:active {
+      transform: translateY(1px);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+    }
+
+    /* P2P Panel & Tabs */
+    .p2p-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      text-align: left;
+      background: rgba(20, 14, 10, 0.7);
+      padding: 18px 16px;
+      border-radius: 14px;
+      border: 1px solid rgba(142, 98, 63, 0.4);
+      margin-bottom: 18px;
+    }
+
+    .p2p-panel label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.9px;
+      color: #d4a373;
+    }
+
+    .code-display {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #120c08;
+      border: 1px solid #8e623f;
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 18px;
+      font-weight: 800;
+      color: #fef08a;
+      letter-spacing: 4px;
+    }
+
+    .input-box {
+      width: 100%;
+      background: #120c08;
+      border: 1px solid #8e623f;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-family: ui-monospace, monospace;
+      font-size: 16px;
+      font-weight: 700;
+      color: #f7eedf;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      outline: none;
+      transition: border-color 0.15s ease;
+    }
+
+    .input-box:focus {
+      border-color: #d4a373;
+    }
+
+    .p2p-status {
+      font-size: 13px;
+      color: #e3bc9a;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      line-height: 1.4;
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #6e6b66;
+      flex-shrink: 0;
+    }
+
+    .status-dot.active {
+      background: #4ade80;
+      box-shadow: 0 0 10px #4ade80;
+    }
+
+    .status-dot.connecting {
+      background: #facc15;
+      box-shadow: 0 0 10px #facc15;
+      animation: pulse 0.9s infinite alternate;
+    }
+
+    @keyframes pulse {
+      from { opacity: 0.35; }
+      to { opacity: 1; }
+    }
+
+    /* Winner celebration */
+    .winner-highlight {
+      font-size: 30px;
+      font-weight: 900;
+      margin-bottom: 6px;
+      letter-spacing: 1px;
+    }
+
+    .winner-p1 {
+      color: #faebd7;
+      text-shadow: 0 0 20px rgba(250, 235, 215, 0.4);
+    }
+
+    .winner-p2 {
+      color: #d1d1d6;
+      text-shadow: 0 0 20px rgba(80, 80, 88, 0.6);
+    }
+  </style>
+</head>
+<body>
+  <div id="app-viewport">
+    <!-- Main 1:2 Canvas (600x1200 Coordinate Space) -->
+    <canvas id="game-canvas" width="600" height="1200"></canvas>
+
+    <!-- Top floating HUD -->
+    <header class="hud-header">
+      <div id="mode-badge" class="hud-badge">
+        <span id="p2p-indicator" class="status-dot"></span>
+        <span id="mode-label">Local 2-Player</span>
+      </div>
+
+      <div class="hud-controls">
+        <button id="btn-sound-toggle" class="hud-btn" aria-label="Toggle Sound" title="Toggle Sound">
+          <svg id="icon-sound-on" viewBox="0 0 24 24">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+            <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+          </svg>
+          <svg id="icon-sound-off" viewBox="0 0 24 24" style="display: none;">
+            <line x1="1" y1="1" x2="23" y2="23"></line>
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+            <path d="M17 14l5-5m0 5l-5-5"></path>
+          </svg>
+        </button>
+
+        <button id="btn-rotate-board" class="hud-btn" aria-label="Rotate Board" title="Rotate Board (Portrait / Landscape)">
+          <svg viewBox="0 0 24 24">
+            <path d="M21 2v6h-6"></path>
+            <path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path>
+            <path d="M3 22v-6h6"></path>
+            <path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path>
+          </svg>
+        </button>
+
+        <button id="btn-menu-toggle" class="hud-btn" aria-label="Game Menu" title="Game Menu">
+          <svg viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Mode-Select Menu -->
+    <div id="modal-menu" class="overlay-screen active">
+      <div class="card-dialog">
+        <h1 class="dialog-title">Super Player Sling Puck</h1>
+        <p class="dialog-subtitle">Authentic wooden fast-sling puck game. Sling all pucks on your side through the center gate into the opponent's half. The one who shoots all the pucks first wins!</p>
+
+        <div class="menu-options">
+          <button id="btn-start-local" class="btn-wood btn-wood-primary">
+            <span>⚔️ Local 2-Player (Pass &amp; Play)</span>
+          </button>
+          <button id="btn-open-p2p" class="btn-wood btn-wood-secondary">
+            <span>🌐 Online P2P (PeerJS WebRTC)</span>
+          </button>
+          <button id="btn-resume-game" class="btn-wood btn-wood-secondary" style="display: none;">
+            <span>▶️ Resume Game</span>
+          </button>
+
+          <div style="display: flex; gap: 8px; width: 100%; margin-top: 6px;">
+            <button id="btn-orient-portrait" class="btn-wood btn-wood-secondary" style="font-size: 13px; padding: 10px 8px; flex: 1;">
+              <span>📱 Portrait</span>
+            </button>
+            <button id="btn-orient-landscape" class="btn-wood btn-wood-secondary" style="font-size: 13px; padding: 10px 8px; flex: 1;">
+              <span>🖥️ Landscape</span>
+            </button>
+            <button id="btn-menu-rotate" class="btn-wood btn-wood-secondary" style="font-size: 13px; padding: 10px 8px; flex: 1;">
+              <span>🔄 Rotate 90°</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- P2P Room Connection Dialog -->
+    <div id="modal-p2p" class="overlay-screen">
+      <div class="card-dialog">
+        <h2 class="dialog-title">Online P2P Match</h2>
+        <p class="dialog-subtitle">Host an authoritative match or join a friend using a 4-character room code.</p>
+
+        <div class="p2p-panel">
+          <label>Host: Your 4-Character Room Code</label>
+          <div class="code-display">
+            <span id="p2p-room-code">----</span>
+            <button id="btn-copy-code" class="hud-btn" style="width: 32px; height: 32px;" title="Copy Code">
+              <svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            </button>
+          </div>
+
+          <label style="margin-top: 6px;">Join: Enter 4-Character Code</label>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="input-join-code" class="input-box" placeholder="e.g. WOOD" maxlength="4" />
+            <button id="btn-join-room" class="btn-wood btn-wood-primary" style="width: auto; padding: 0 18px; font-size: 14px;">Join</button>
+          </div>
+
+          <div class="p2p-status">
+            <span id="p2p-modal-dot" class="status-dot"></span>
+            <span id="p2p-modal-status">Initializing PeerJS connection...</span>
+          </div>
+        </div>
+
+        <div class="menu-options">
+          <button id="btn-back-menu" class="btn-wood btn-wood-secondary">
+            <span>⬅️ Back to Main Menu</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Disconnect Alert Overlay -->
+    <div id="modal-disconnect" class="overlay-screen">
+      <div class="card-dialog">
+        <h2 class="dialog-title" style="color: #f87171;">Opponent Disconnected</h2>
+        <p class="dialog-subtitle">The peer connection was lost mid-match. The game simulation has been frozen.</p>
+        <div class="menu-options">
+          <button id="btn-disconnect-menu" class="btn-wood btn-wood-primary">
+            <span>🏠 Return to Mode Select</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Victory Overlay -->
+    <div id="modal-victory" class="overlay-screen">
+      <div class="card-dialog">
+        <div id="victory-title" class="winner-highlight winner-p1">Player 1 Wins!</div>
+        <p id="victory-subtitle" class="dialog-subtitle">All pucks successfully cleared to the opponent's half!</p>
+
+        <div class="menu-options">
+          <button id="btn-rematch" class="btn-wood btn-wood-primary">
+            <span>🔄 Rematch</span>
+          </button>
+          <button id="btn-victory-menu" class="btn-wood btn-wood-secondary">
+            <span>🏠 Main Menu</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /**
+     * TIMBER STRIKE - Principal Creative Web Game Engine
+     * Complete, fully playable 2-player wooden sling-puck table board.
+     * Includes:
+     * - Phase 1: Local 2-Player with continuous 4-substep physics, concurrent multi-touch, procedural Web Audio.
+     * - Phase 2: Online P2P via PeerJS (WebRTC DataConnection):
+     *   * 4-character room codes (e.g. "WOOD") namespaced as "timber-strike-WOOD"
+     *   * Authoritative Host physics simulation broadcasting snapshots at fixed 30 fps
+     *   * Client sends input packets (dragStart, dragUpdate, release) with 33ms linear interpolation
+     *   * Perspective correction: Client flips camera view 180° locally so their home half is always at the bottom
+     *   * Mid-match disconnect handling freezing simulation with return to Mode Select.
+     */
+
+    // --- BOARD SPECIFICATION & CONSTANTS ---
+    const BOARD_WIDTH = 600;
+    const BOARD_HEIGHT = 1200;
+    const PUCK_RADIUS = 32; // 64px diameter
+    const MAX_DRAG_DISTANCE = 140; // Max slingshot pull stretch
+    const LAUNCH_POWER = 0.22; // px/frame velocity per px stretched
+    const FRICTION = 0.994; // Velocity decay per sub-step
+    const RESTITUTION_RAIL = 0.84; // Wall restitution
+    const RESTITUTION_PUCK = 0.88; // Puck-to-puck restitution
+    const IDLE_VELOCITY_THRESHOLD = 0.05; // Snap to 0 below this speed
+    const SUB_STEPS = 8; // 8 sub-steps per frame: bulletproof precision preventing boundary tunneling
+
+    // Rails & Boundaries
+    const BEZEL_THICKNESS = 28;
+    const RAIL_LEFT = BEZEL_THICKNESS;
+    const RAIL_RIGHT = BOARD_WIDTH - BEZEL_THICKNESS;
+    const RAIL_TOP = BEZEL_THICKNESS;
+    const RAIL_BOTTOM = BOARD_HEIGHT - BEZEL_THICKNESS;
+
+    // Physical Center Wooden Divider & Central Slot Gate
+    const DIVIDER_Y = 600;
+    const DIVIDER_THICKNESS = 24; // Y from 588 to 612
+    const DIVIDER_TOP = DIVIDER_Y - DIVIDER_THICKNESS / 2; // 588
+    const DIVIDER_BOTTOM = DIVIDER_Y + DIVIDER_THICKNESS / 2; // 612
+
+    // Slot Gate in the center of the divider (authentic Super Player dimensions)
+    const GATE_WIDTH = 96; // 96px opening (puck is 64px diameter -> 16px clearance each side)
+    const GATE_HALF_WIDTH = GATE_WIDTH / 2; // 48px
+    const GATE_LEFT = (BOARD_WIDTH / 2) - GATE_HALF_WIDTH; // 252
+    const GATE_RIGHT = (BOARD_WIDTH / 2) + GATE_HALF_WIDTH; // 348
+    const GATE_POST_RADIUS = 12; // Rounded wooden post caps at gate opening
+
+    // Slingshot Elastic Bands
+    const BAND_BOTTOM_Y = 1070; // Bottom player's resting elastic band
+    const BAND_TOP_Y = 130;     // Top player's resting elastic band
+    const BAND_RESTITUTION = 0.94; // Springiness of the elastic band
+
+    // --- GAME STATE ---
+    const State = {
+      pucks: [],
+      particles: [],
+      confetti: [],
+      activePointers: new Map(), // pointerId -> DragSession
+      mode: 'local', // 'local' | 'p2p-host' | 'p2p-client'
+      isMuted: false,
+      gameActive: false,
+      winner: null,
+      myPlayerId: 1, // 1: bottom (Player 1), 2: top (Player 2)
+      remoteAim: null, // { puckId, curX, curY, dist }
+      hasStartedOnce: false,
+      boardRotation: 0 // 0: Portrait (P1 Bottom), 90: Landscape (P1 Left), 180: Portrait (P2 Bottom), 270: Landscape (P2 Left)
+    };
+
+    function setBoardRotation(deg) {
+      State.boardRotation = ((deg % 360) + 360) % 360;
+      const isLandscape = State.boardRotation === 90 || State.boardRotation === 270;
+
+      const c = document.getElementById('game-canvas');
+      const hud = document.querySelector('.hud-header');
+      const rotBtn = document.getElementById('btn-rotate-board');
+
+      if (c) {
+        if (isLandscape) {
+          c.width = 1200;
+          c.height = 600;
+          c.classList.remove('is-portrait');
+          c.classList.add('is-landscape');
+        } else {
+          c.width = 600;
+          c.height = 1200;
+          c.classList.remove('is-landscape');
+          c.classList.add('is-portrait');
+        }
+      }
+
+      if (hud) {
+        if (isLandscape) hud.classList.add('landscape');
+        else hud.classList.remove('landscape');
+      }
+
+      const rotLabels = {
+        0: 'Portrait (P1 Bottom)',
+        90: 'Landscape (P1 Left)',
+        180: 'Portrait (P2 Bottom)',
+        270: 'Landscape (P2 Left)'
+      };
+      if (rotBtn) {
+        rotBtn.title = `Rotate Board (${rotLabels[State.boardRotation] || State.boardRotation + '°'})`;
+      }
+    }
+
+    // Client Interpolation Buffer for P2P Client Mode
+    const ClientInterpolation = {
+      prevSnapTime: 0,
+      snapshotDuration: 33.33, // 30 fps = ~33.33ms
+      snapshots: new Map() // puckId -> { startX, startY, targetX, targetY, lastReceivedTime }
+    };
+
+    // --- PROCEDURAL WEB AUDIO SYNTHESIZER ---
+    class SoundEngine {
+      constructor() {
+        this.ctx = null;
+        this.tensionOsc = null;
+        this.tensionGain = null;
+      }
+
+      init() {
+        if (!this.ctx) {
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          if (AudioContext) {
+            this.ctx = new AudioContext();
+          }
+        }
+        if (this.ctx && this.ctx.state === 'suspended') {
+          this.ctx.resume();
+        }
+      }
+
+      playImpact(speed) {
+        if (State.isMuted || !this.ctx) return;
+        this.init();
+
+        const intensity = Math.min(Math.max(speed / 14, 0.1), 1.0);
+        const t = this.ctx.currentTime;
+
+        const osc1 = this.ctx.createOscillator();
+        const osc2 = this.ctx.createOscillator();
+        const gain1 = this.ctx.createGain();
+        const gain2 = this.ctx.createGain();
+        const filter = this.ctx.createBiquadFilter();
+
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(600 + intensity * 600, t);
+
+        osc1.type = 'sine';
+        osc1.frequency.setValueAtTime(140 + intensity * 40, t);
+        osc1.frequency.exponentialRampToValueAtTime(70, t + 0.08);
+
+        osc2.type = 'triangle';
+        osc2.frequency.setValueAtTime(260 + intensity * 60, t);
+        osc2.frequency.exponentialRampToValueAtTime(120, t + 0.06);
+
+        gain1.gain.setValueAtTime(0.4 * intensity, t);
+        gain1.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
+
+        gain2.gain.setValueAtTime(0.3 * intensity, t);
+        gain2.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
+
+        osc1.connect(gain1);
+        osc2.connect(gain2);
+        gain1.connect(filter);
+        gain2.connect(filter);
+        filter.connect(this.ctx.destination);
+
+        osc1.start(t);
+        osc2.start(t);
+        osc1.stop(t + 0.1);
+        osc2.stop(t + 0.1);
+      }
+
+      playPegThwack(speed = 4) {
+        if (State.isMuted || !this.ctx) return;
+        this.init();
+
+        const t = this.ctx.currentTime;
+        const intensity = Math.min(Math.max(speed / 12, 0.2), 1.0);
+
+        // 1. Crisp wood/brass strike transient (noise burst)
+        const bufLen = Math.floor(this.ctx.sampleRate * 0.02);
+        const noiseBuf = this.ctx.createBuffer(1, bufLen, this.ctx.sampleRate);
+        const output = noiseBuf.getChannelData(0);
+        for (let i = 0; i < bufLen; i++) {
+          output[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufLen * 0.22));
+        }
+        const noiseSrc = this.ctx.createBufferSource();
+        noiseSrc.buffer = noiseBuf;
+
+        const noiseFilter = this.ctx.createBiquadFilter();
+        noiseFilter.type = 'bandpass';
+        noiseFilter.frequency.setValueAtTime(2400, t);
+        noiseFilter.Q.setValueAtTime(2.5, t);
+
+        const noiseGain = this.ctx.createGain();
+        noiseGain.gain.setValueAtTime(0.24 * intensity, t);
+        noiseGain.gain.exponentialRampToValueAtTime(0.001, t + 0.02);
+
+        noiseSrc.connect(noiseFilter);
+        noiseFilter.connect(noiseGain);
+        noiseGain.connect(this.ctx.destination);
+        noiseSrc.start(t);
+
+        // 2. Resonant wood thwack body (rapid down-sweep knock)
+        const oscBody = this.ctx.createOscillator();
+        const bodyGain = this.ctx.createGain();
+        const bodyFilter = this.ctx.createBiquadFilter();
+
+        oscBody.type = 'triangle';
+        oscBody.frequency.setValueAtTime(480, t);
+        oscBody.frequency.exponentialRampToValueAtTime(125, t + 0.045);
+
+        bodyFilter.type = 'lowpass';
+        bodyFilter.frequency.setValueAtTime(1400, t);
+
+        bodyGain.gain.setValueAtTime(0.32 * intensity, t);
+        bodyGain.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+
+        oscBody.connect(bodyFilter);
+        bodyFilter.connect(bodyGain);
+        bodyGain.connect(this.ctx.destination);
+
+        oscBody.start(t);
+        oscBody.stop(t + 0.06);
+
+        // 3. Subtle elastic brass peg ring / ping
+        const oscPing = this.ctx.createOscillator();
+        const pingGain = this.ctx.createGain();
+
+        oscPing.type = 'sine';
+        oscPing.frequency.setValueAtTime(920 + Math.random() * 50, t);
+
+        pingGain.gain.setValueAtTime(0.14 * intensity, t);
+        pingGain.gain.exponentialRampToValueAtTime(0.001, t + 0.065);
+
+        oscPing.connect(pingGain);
+        pingGain.connect(this.ctx.destination);
+
+        oscPing.start(t);
+        oscPing.stop(t + 0.07);
+      }
+
+      startTensionHum(stretchRatio) {
+        if (State.isMuted || !this.ctx) return;
+        this.init();
+
+        const t = this.ctx.currentTime;
+        if (!this.tensionOsc) {
+          this.tensionOsc = this.ctx.createOscillator();
+          this.tensionGain = this.ctx.createGain();
+          const filter = this.ctx.createBiquadFilter();
+
+          this.tensionOsc.type = 'triangle';
+          filter.type = 'lowpass';
+          filter.frequency.setValueAtTime(450, t);
+
+          this.tensionGain.gain.setValueAtTime(0.01, t);
+          this.tensionOsc.connect(filter);
+          filter.connect(this.tensionGain);
+          this.tensionGain.connect(this.ctx.destination);
+          this.tensionOsc.start();
+        }
+
+        const targetFreq = 90 + stretchRatio * 180;
+        this.tensionOsc.frequency.setTargetAtTime(targetFreq, t, 0.04);
+        this.tensionGain.gain.setTargetAtTime(0.08 * stretchRatio, t, 0.04);
+      }
+
+      stopTensionHum() {
+        if (this.tensionGain && this.ctx) {
+          this.tensionGain.gain.setTargetAtTime(0.001, this.ctx.currentTime, 0.02);
+          setTimeout(() => {
+            if (this.tensionOsc && State.activePointers.size === 0) {
+              try {
+                this.tensionOsc.stop();
+                this.tensionOsc.disconnect();
+              } catch (_) {}
+              this.tensionOsc = null;
+              this.tensionGain = null;
+            }
+          }, 40);
+        }
+      }
+
+      playSnap() {
+        if (State.isMuted || !this.ctx) return;
+        this.init();
+        this.stopTensionHum();
+
+        const t = this.ctx.currentTime;
+        const bufferSize = Math.floor(this.ctx.sampleRate * 0.05);
+        const noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+        const output = noiseBuffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          output[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.25));
+        }
+
+        const whiteNoise = this.ctx.createBufferSource();
+        whiteNoise.buffer = noiseBuffer;
+
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.setValueAtTime(1400, t);
+        filter.frequency.exponentialRampToValueAtTime(350, t + 0.05);
+
+        const gain = this.ctx.createGain();
+        gain.gain.setValueAtTime(0.35, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+
+        whiteNoise.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.ctx.destination);
+
+        whiteNoise.start(t);
+      }
+
+      playScoreChime() {
+        if (State.isMuted || !this.ctx) return;
+        this.init();
+
+        const t = this.ctx.currentTime;
+        const notes = [1046.50, 1318.51, 1567.98, 2093.00];
+        notes.forEach((freq, idx) => {
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          const noteTime = t + idx * 0.06;
+
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, noteTime);
+
+          gain.gain.setValueAtTime(0.22, noteTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, noteTime + 0.45);
+
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+
+          osc.start(noteTime);
+          osc.stop(noteTime + 0.5);
+        });
+      }
+
+      playVictoryFanfare() {
+        if (State.isMuted || !this.ctx) return;
+        this.init();
+
+        const t = this.ctx.currentTime;
+        const melody = [
+          { f: 523.25, d: 0.12 },
+          { f: 659.25, d: 0.12 },
+          { f: 783.99, d: 0.12 },
+          { f: 1046.5, d: 0.35 },
+          { f: 880.00, d: 0.14 },
+          { f: 1046.5, d: 0.50 }
+        ];
+
+        let offset = 0;
+        melody.forEach(note => {
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          const startT = t + offset;
+
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(note.f, startT);
+
+          gain.gain.setValueAtTime(0.28, startT);
+          gain.gain.exponentialRampToValueAtTime(0.001, startT + note.d);
+
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+
+          osc.start(startT);
+          osc.stop(startT + note.d + 0.05);
+          offset += note.d * 0.85;
+        });
+      }
+    }
+
+    const sound = new SoundEngine();
+
+    // --- PUCK CLASS ---
+    class Puck {
+      constructor(id, color, x, y) {
+        this.id = id;
+        this.color = color; // 'charcoal' | 'ivory'
+        this.x = x;
+        this.y = y;
+        this.vx = 0;
+        this.vy = 0;
+        this.radius = PUCK_RADIUS;
+        this.state = 'idle'; // 'idle' | 'live'
+        this.draggedByPointerId = null;
+        this.anchorX = x;
+        this.anchorY = y;
+      }
+
+      get speed() {
+        return Math.hypot(this.vx, this.vy);
+      }
+
+      isDraggable(byPlayer) {
+        // Fast sling-puck rule: Any puck on your half of the board can be dragged and shot!
+        // Player 1 (Bottom): any puck with y > DIVIDER_Y
+        // Player 2 (Top): any puck with y < DIVIDER_Y
+        if (byPlayer === 1 && this.y > DIVIDER_Y + 4) return true;
+        if (byPlayer === 2 && this.y < DIVIDER_Y - 4) return true;
+        return false;
+      }
+    }
+
+    // Initialize pucks: 5 Charcoal (Bottom) and 5 Ivory (Top) lined up ready for action
+    function initPucks() {
+      State.pucks = [];
+      State.activePointers.clear();
+      ClientInterpolation.snapshots.clear();
+
+      // Starting lineup along the elastic bands (exact match to video at 00:00 & 00:40)
+      const startX = [95, 198, 300, 402, 505];
+
+      // 5 Charcoal Pucks for Bottom Player
+      startX.forEach((x, idx) => {
+        State.pucks.push(new Puck(`p_bot_${idx}`, 'charcoal', x, 1005));
+      });
+
+      // 5 Ivory Pucks for Top Player
+      startX.forEach((x, idx) => {
+        State.pucks.push(new Puck(`p_top_${idx}`, 'ivory', x, 195));
+      });
+
+      State.particles = [];
+      State.confetti = [];
+      State.winner = null;
+      State.remoteAim = null;
+      State.gameActive = true;
+      State.hasStartedOnce = true;
+      document.getElementById('btn-resume-game').style.display = 'flex';
+      updateHUD();
+    }
+
+    // --- PARTICLE & VISUAL FX ---
+    function spawnSparks(x, y, count = 5) {
+      for (let i = 0; i < count; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 1.2 + Math.random() * 3.5;
+        State.particles.push({
+          type: 'spark',
+          x,
+          y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          life: 1.0,
+          decay: 0.04 + Math.random() * 0.04,
+          radius: 1.5 + Math.random() * 2,
+          color: Math.random() > 0.4 ? '#fcd34d' : '#fb923c'
+        });
+      }
+    }
+
+    function spawnGoalBurst(x, y, color = '#fef08a') {
+      State.particles.push({
+        type: 'ring',
+        x,
+        y,
+        radius: PUCK_RADIUS * 0.6,
+        maxRadius: PUCK_RADIUS * 2.8,
+        life: 1.0,
+        decay: 0.035,
+        color
+      });
+
+      for (let i = 0; i < 22; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 2.5 + Math.random() * 5.0;
+        State.particles.push({
+          type: 'spark',
+          x,
+          y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          life: 1.0,
+          decay: 0.02 + Math.random() * 0.03,
+          radius: 2.5 + Math.random() * 3,
+          color: i % 2 === 0 ? '#fde047' : '#f4ede2'
+        });
+      }
+    }
+
+    function spawnVictoryConfetti() {
+      const colors = ['#d4a373', '#f4ede2', '#38bdf8', '#4ade80', '#fbbf24', '#f43f5e'];
+      for (let i = 0; i < 90; i++) {
+        State.confetti.push({
+          x: Math.random() * BOARD_WIDTH,
+          y: Math.random() * (BOARD_HEIGHT * 0.4) + (BOARD_HEIGHT * 0.3),
+          vx: (Math.random() - 0.5) * 6,
+          vy: -4 - Math.random() * 6,
+          rotation: Math.random() * Math.PI * 2,
+          vRot: (Math.random() - 0.5) * 0.2,
+          size: 6 + Math.random() * 8,
+          color: colors[Math.floor(Math.random() * colors.length)]
+        });
+      }
+    }
+
+    // --- CONTINUOUS PHYSICS ENGINE (AUTHORITATIVE ON LOCAL / HOST) ---
+    // Robust Circle vs Axis-Aligned Bounding Box (AABB) collision resolution
+    function resolveCircleBoxCollision(p, minX, maxX, minY, maxY) {
+      const cx = Math.max(minX, Math.min(p.x, maxX));
+      const cy = Math.max(minY, Math.min(p.y, maxY));
+      const dx = p.x - cx;
+      const dy = p.y - cy;
+      const distSq = dx * dx + dy * dy;
+
+      if (distSq < p.radius * p.radius) {
+        let nx = 0;
+        let ny = 0;
+        let overlap = 0;
+
+        if (distSq > 0.0001) {
+          const dist = Math.sqrt(distSq);
+          nx = dx / dist;
+          ny = dy / dist;
+          overlap = p.radius - dist;
+        } else {
+          // Circle center is inside box: push out along shortest axis
+          const distLeft = p.x - minX;
+          const distRight = maxX - p.x;
+          const distTop = p.y - minY;
+          const distBottom = maxY - p.y;
+          const minDist = Math.min(distLeft, distRight, distTop, distBottom);
+
+          if (minDist === distTop) {
+            nx = 0; ny = -1; overlap = p.radius + distTop;
+          } else if (minDist === distBottom) {
+            nx = 0; ny = 1; overlap = p.radius + distBottom;
+          } else if (minDist === distLeft) {
+            nx = -1; ny = 0; overlap = p.radius + distLeft;
+          } else {
+            nx = 1; ny = 0; overlap = p.radius + distRight;
+          }
+        }
+
+        p.x += nx * overlap;
+        p.y += ny * overlap;
+
+        const velAlongNormal = p.vx * nx + p.vy * ny;
+        if (velAlongNormal < 0) {
+          const impulse = -(1 + RESTITUTION_RAIL) * velAlongNormal;
+          p.vx += impulse * nx;
+          p.vy += impulse * ny;
+
+          const impactSpeed = Math.abs(velAlongNormal);
+          if (impactSpeed > 0.35) {
+            sound.playImpact(impactSpeed);
+            spawnSparks(cx, cy, Math.min(Math.floor(impactSpeed * 2), 5));
+          }
+        }
+      }
+    }
+
+    function stepPhysics() {
+      if (!State.gameActive) return;
+
+      // In P2P Client mode, client does NOT simulate physics — it interpolates host snapshots!
+      if (State.mode === 'p2p-client') {
+        interpolateClientPositions();
+        updateFxAndConfetti();
+        return;
+      }
+
+      const subDt = 1.0 / SUB_STEPS;
+
+      for (let step = 0; step < SUB_STEPS; step++) {
+        // 1. Integrate positions
+        for (let i = 0; i < State.pucks.length; i++) {
+          const p = State.pucks[i];
+          if (p.draggedByPointerId !== null) continue;
+
+          p.x += p.vx * subDt;
+          p.y += p.vy * subDt;
+
+          p.vx *= Math.pow(FRICTION, subDt);
+          p.vy *= Math.pow(FRICTION, subDt);
+
+          if (p.speed < IDLE_VELOCITY_THRESHOLD) {
+            p.vx = 0;
+            p.vy = 0;
+            p.state = 'idle';
+          }
+        }
+
+        // 2. Resolve all Puck-Puck Collisions
+        for (let i = 0; i < State.pucks.length; i++) {
+          const p1 = State.pucks[i];
+
+          for (let j = i + 1; j < State.pucks.length; j++) {
+            const p2 = State.pucks[j];
+
+            const dx = p2.x - p1.x;
+            const dy = p2.y - p1.y;
+            const dist = Math.hypot(dx, dy);
+            const minDist = p1.radius + p2.radius;
+
+            if (dist < minDist && dist > 0.0001) {
+              const nx = dx / dist;
+              const ny = dy / dist;
+
+              const kx = p1.vx - p2.vx;
+              const ky = p1.vy - p2.vy;
+              const p = 2 * (nx * kx + ny * ky) / 2;
+
+              if (p > 0) {
+                p1.vx -= p * nx * RESTITUTION_PUCK;
+                p1.vy -= p * ny * RESTITUTION_PUCK;
+                p2.vx += p * nx * RESTITUTION_PUCK;
+                p2.vy += p * ny * RESTITUTION_PUCK;
+
+                p1.state = 'live';
+                p2.state = 'live';
+
+                const collisionSpeed = Math.abs(p);
+                if (collisionSpeed > 0.35) {
+                  sound.playImpact(collisionSpeed);
+                  const midX = p1.x + nx * p1.radius;
+                  const midY = p1.y + ny * p1.radius;
+                  spawnSparks(midX, midY, Math.min(Math.floor(collisionSpeed * 2), 6));
+                }
+              }
+
+              // Overlap separation
+              const overlap = minDist - dist;
+              const sepX = nx * overlap * 0.5;
+              const sepY = ny * overlap * 0.5;
+
+              if (p1.draggedByPointerId === null) {
+                p1.x -= sepX;
+                p1.y -= sepY;
+              }
+              if (p2.draggedByPointerId === null) {
+                p2.x += sepX;
+                p2.y += sepY;
+              }
+            }
+          }
+        }
+
+        // 3. Resolve Center Wooden Divider & Central Slot Gate Collisions
+        // Left Wooden Beam Box: extends continuously past RAIL_LEFT to GATE_LEFT
+        // Right Wooden Beam Box: extends from GATE_RIGHT continuously past RAIL_RIGHT
+        for (let i = 0; i < State.pucks.length; i++) {
+          const p = State.pucks[i];
+          if (p.draggedByPointerId !== null) continue;
+
+          // A. Left Beam Box: X in [-PUCK_RADIUS * 2, GATE_LEFT], Y in [DIVIDER_TOP, DIVIDER_BOTTOM]
+          resolveCircleBoxCollision(
+            p,
+            -PUCK_RADIUS * 2,
+            GATE_LEFT,
+            DIVIDER_TOP,
+            DIVIDER_BOTTOM
+          );
+
+          // B. Right Beam Box: X in [GATE_RIGHT, BOARD_WIDTH + PUCK_RADIUS * 2], Y in [DIVIDER_TOP, DIVIDER_BOTTOM]
+          resolveCircleBoxCollision(
+            p,
+            GATE_RIGHT,
+            BOARD_WIDTH + PUCK_RADIUS * 2,
+            DIVIDER_TOP,
+            DIVIDER_BOTTOM
+          );
+
+          // C. Rounded Post Caps at the gate opening for extra smooth corner deflections
+          const gatePosts = [
+            { x: GATE_LEFT, y: DIVIDER_Y },
+            { x: GATE_RIGHT, y: DIVIDER_Y }
+          ];
+          for (let post of gatePosts) {
+            const dx = p.x - post.x;
+            const dy = p.y - post.y;
+            const dist = Math.hypot(dx, dy);
+            const minDist = p.radius + GATE_POST_RADIUS;
+
+            if (dist < minDist && dist > 0.0001) {
+              const nx = dx / dist;
+              const ny = dy / dist;
+              const velAlongNormal = p.vx * nx + p.vy * ny;
+
+              if (velAlongNormal < 0) {
+                const impulse = -(1 + RESTITUTION_RAIL) * velAlongNormal;
+                p.vx += impulse * nx;
+                p.vy += impulse * ny;
+
+                if (Math.abs(velAlongNormal) > 0.35) {
+                  sound.playImpact(Math.abs(velAlongNormal));
+                  spawnSparks(post.x + nx * GATE_POST_RADIUS, post.y + ny * GATE_POST_RADIUS, 4);
+                }
+              }
+
+              const overlap = minDist - dist;
+              p.x += nx * overlap;
+              p.y += ny * overlap;
+            }
+          }
+
+          // 4. Slingshot Elastic Cords Rebound
+          // Bottom elastic cord (only in bottom half)
+          if (p.y > DIVIDER_Y && p.vy > 0 && p.y + p.radius >= BAND_BOTTOM_Y && p.y < RAIL_BOTTOM) {
+            p.y = BAND_BOTTOM_Y - p.radius;
+            p.vy = -Math.abs(p.vy) * BAND_RESTITUTION;
+            p.vx += (Math.random() - 0.5) * 0.4;
+            if (Math.abs(p.vy) > 0.4) {
+              sound.playImpact(Math.abs(p.vy));
+              spawnSparks(p.x, BAND_BOTTOM_Y, 3);
+            }
+          }
+
+          // Top elastic cord (only in top half)
+          if (p.y < DIVIDER_Y && p.vy < 0 && p.y - p.radius <= BAND_TOP_Y && p.y > RAIL_TOP) {
+            p.y = BAND_TOP_Y + p.radius;
+            p.vy = Math.abs(p.vy) * BAND_RESTITUTION;
+            p.vx += (Math.random() - 0.5) * 0.4;
+            if (Math.abs(p.vy) > 0.4) {
+              sound.playImpact(Math.abs(p.vy));
+              spawnSparks(p.x, BAND_TOP_Y, 3);
+            }
+          }
+
+          // 5. Rails and Backboards Collision
+          // Left rail
+          if (p.x - p.radius < RAIL_LEFT) {
+            p.x = RAIL_LEFT + p.radius;
+            if (p.vx < 0) {
+              p.vx = -p.vx * RESTITUTION_RAIL;
+              if (Math.abs(p.vx) > 0.4) {
+                sound.playImpact(Math.abs(p.vx));
+                spawnSparks(RAIL_LEFT, p.y, 3);
+              }
+            }
+          }
+          // Right rail
+          else if (p.x + p.radius > RAIL_RIGHT) {
+            p.x = RAIL_RIGHT - p.radius;
+            if (p.vx > 0) {
+              p.vx = -p.vx * RESTITUTION_RAIL;
+              if (Math.abs(p.vx) > 0.4) {
+                sound.playImpact(Math.abs(p.vx));
+                spawnSparks(RAIL_RIGHT, p.y, 3);
+              }
+            }
+          }
+
+          // Top rail backboard
+          if (p.y - p.radius < RAIL_TOP) {
+            p.y = RAIL_TOP + p.radius;
+            if (p.vy < 0) {
+              p.vy = -p.vy * RESTITUTION_RAIL;
+              if (Math.abs(p.vy) > 0.4) sound.playImpact(Math.abs(p.vy));
+            }
+          }
+          // Bottom rail backboard
+          else if (p.y + p.radius > RAIL_BOTTOM) {
+            p.y = RAIL_BOTTOM - p.radius;
+            if (p.vy > 0) {
+              p.vy = -p.vy * RESTITUTION_RAIL;
+              if (Math.abs(p.vy) > 0.4) sound.playImpact(Math.abs(p.vy));
+            }
+          }
+        }
+      }
+
+      // Check win condition (all 10 pucks cleared from one player's half)
+      checkWinCondition();
+      updateFxAndConfetti();
+    }
+
+    function checkWinCondition() {
+      if (!State.gameActive) return;
+
+      const bottomCount = State.pucks.filter(p => p.y > DIVIDER_Y).length;
+      const topCount = State.pucks.filter(p => p.y < DIVIDER_Y).length;
+
+      // When a player has 0 pucks on their side, they win!
+      if (bottomCount === 0 && topCount === 10) {
+        triggerVictory(1);
+      } else if (topCount === 0 && bottomCount === 10) {
+        triggerVictory(2);
+      }
+    }
+
+    // Client-side snapshot interpolation (smooth ~33ms lerp between 30fps snapshots)
+    function interpolateClientPositions() {
+      const now = performance.now();
+      for (let puck of State.pucks) {
+        if (puck.draggedByPointerId !== null) continue; // client is dragging this puck locally
+
+        const snap = ClientInterpolation.snapshots.get(puck.id);
+        if (snap) {
+          const elapsed = now - snap.lastReceivedTime;
+          const t = Math.min(Math.max(elapsed / ClientInterpolation.snapshotDuration, 0), 1);
+          puck.x = snap.startX + (snap.targetX - snap.startX) * t;
+          puck.y = snap.startY + (snap.targetY - snap.startY) * t;
+        }
+      }
+    }
+
+    function updateFxAndConfetti() {
+      for (let i = State.particles.length - 1; i >= 0; i--) {
+        const pt = State.particles[i];
+        pt.life -= pt.decay;
+        if (pt.type === 'spark') {
+          pt.x += pt.vx;
+          pt.y += pt.vy;
+        } else if (pt.type === 'ring') {
+          pt.radius += (pt.maxRadius - pt.radius) * 0.12;
+        }
+        if (pt.life <= 0) {
+          State.particles.splice(i, 1);
+        }
+      }
+
+      for (let i = State.confetti.length - 1; i >= 0; i--) {
+        const c = State.confetti[i];
+        c.x += c.vx;
+        c.y += c.vy;
+        c.vy += 0.18;
+        c.rotation += c.vRot;
+        if (c.y > BOARD_HEIGHT + 20) {
+          State.confetti.splice(i, 1);
+        }
+      }
+    }
+
+    function triggerVictory(winnerId) {
+      State.gameActive = false;
+      State.winner = winnerId;
+      spawnVictoryConfetti();
+      sound.playVictoryFanfare();
+
+      const modal = document.getElementById('modal-victory');
+      const title = document.getElementById('victory-title');
+      const sub = document.getElementById('victory-subtitle');
+
+      if (winnerId === 1) {
+        title.textContent = State.mode === 'p2p-client' ? 'Host (Bottom) Wins!' : (State.mode === 'p2p-host' ? 'You Win!' : 'Player 1 (Bottom) Wins!');
+        title.className = 'winner-highlight winner-p1';
+        sub.textContent = 'Cleared all pucks to the opponent\'s half!';
+      } else {
+        title.textContent = State.mode === 'p2p-client' ? 'You Win!' : (State.mode === 'p2p-host' ? 'Guest (Top) Wins!' : 'Player 2 (Top) Wins!');
+        title.className = 'winner-highlight winner-p2';
+        sub.textContent = 'Cleared all pucks to the opponent\'s half!';
+      }
+
+      modal.classList.add('active');
+
+      if (State.mode === 'p2p-host' && P2P.conn) {
+        P2P.send({
+          type: 'victory',
+          winnerId
+        });
+      }
+    }
+
+    function updateHUD() {
+      const bottomRemaining = State.pucks.filter(p => p.y > DIVIDER_Y).length;
+      const topRemaining = State.pucks.filter(p => p.y < DIVIDER_Y).length;
+
+      const badgeLabel = document.getElementById('mode-label');
+      const indicator = document.getElementById('p2p-indicator');
+
+      if (State.mode === 'local') {
+        badgeLabel.textContent = `Local 2-Player (Bottom: ${bottomRemaining} | Top: ${topRemaining})`;
+        indicator.className = 'status-dot';
+      } else if (State.mode === 'p2p-host') {
+        badgeLabel.textContent = `Host: Room ${P2P.currentRoomCode} (You: ${bottomRemaining} | Opponent: ${topRemaining})`;
+        indicator.className = 'status-dot active';
+      } else if (State.mode === 'p2p-client') {
+        badgeLabel.textContent = `Guest: Room ${P2P.currentRoomCode} (You: ${topRemaining} | Opponent: ${bottomRemaining})`;
+        indicator.className = 'status-dot active';
+      }
+    }
+
+    // --- CONCURRENT MULTI-TOUCH & PERSPECTIVE-AWARE INPUT ---
+    const canvas = document.getElementById('game-canvas');
+    const ctx = canvas.getContext('2d');
+
+    // Convert screen coordinates to canvas physics coordinates (600x1200)
+    // Supports 0° Portrait, 90° Landscape, 180° Portrait, and 270° Landscape
+    function getCanvasPoint(event) {
+      const rect = canvas.getBoundingClientRect();
+      const u = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+      const v = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
+
+      let x = 0;
+      let y = 0;
+
+      if (State.boardRotation === 0) {
+        x = u * BOARD_WIDTH;
+        y = v * BOARD_HEIGHT;
+      } else if (State.boardRotation === 90) {
+        x = v * BOARD_WIDTH;
+        y = (1 - u) * BOARD_HEIGHT;
+      } else if (State.boardRotation === 180) {
+        x = (1 - u) * BOARD_WIDTH;
+        y = (1 - v) * BOARD_HEIGHT;
+      } else if (State.boardRotation === 270) {
+        x = (1 - v) * BOARD_WIDTH;
+        y = u * BOARD_HEIGHT;
+      }
+
+      return { x, y };
+    }
+
+    canvas.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
+
+    function handlePointerDown(e) {
+      if (!State.gameActive) return;
+      sound.init();
+
+      const pt = getCanvasPoint(e);
+      const allowedPlayers = State.mode === 'local' ? [1, 2] : [State.myPlayerId];
+
+      let targetPuck = null;
+      let minDist = Infinity;
+
+      for (let p of State.pucks) {
+        if (p.draggedByPointerId !== null) continue;
+        for (let player of allowedPlayers) {
+          if (p.isDraggable(player)) {
+            const dist = Math.hypot(pt.x - p.x, pt.y - p.y);
+            if (dist < p.radius * 1.6 && dist < minDist) {
+              minDist = dist;
+              targetPuck = p;
+            }
+          }
+        }
+      }
+
+      if (targetPuck) {
+        targetPuck.draggedByPointerId = e.pointerId;
+        targetPuck.anchorX = targetPuck.x;
+        targetPuck.anchorY = targetPuck.y;
+
+        State.activePointers.set(e.pointerId, {
+          puck: targetPuck,
+          anchorX: targetPuck.x,
+          anchorY: targetPuck.y,
+          currentX: pt.x,
+          currentY: pt.y,
+          dragDistance: 0,
+          pullVector: { x: 0, y: 0 }
+        });
+
+        canvas.setPointerCapture(e.pointerId);
+
+        // Notify host if client
+        if (State.mode === 'p2p-client' && P2P.conn) {
+          P2P.send({
+            type: 'dragStart',
+            puckId: targetPuck.id,
+            anchorX: targetPuck.x,
+            anchorY: targetPuck.y,
+            ptX: pt.x,
+            ptY: pt.y
+          });
+        }
+      }
+    }
+
+    function handlePointerMove(e) {
+      const session = State.activePointers.get(e.pointerId);
+      if (!session) return;
+
+      const pt = getCanvasPoint(e);
+      let dx = pt.x - session.anchorX;
+      let dy = pt.y - session.anchorY;
+      let dist = Math.hypot(dx, dy);
+
+      if (dist > MAX_DRAG_DISTANCE) {
+        dx = (dx / dist) * MAX_DRAG_DISTANCE;
+        dy = (dy / dist) * MAX_DRAG_DISTANCE;
+        dist = MAX_DRAG_DISTANCE;
+      }
+
+      session.currentX = session.anchorX + dx;
+      session.currentY = session.anchorY + dy;
+
+      // Restrict dragged puck strictly to player's board boundary to prevent crossing divider or walls
+      const minX = RAIL_LEFT + session.puck.radius;
+      const maxX = RAIL_RIGHT - session.puck.radius;
+      let minY, maxY;
+      if (session.anchorY > DIVIDER_Y) {
+        // Bottom player
+        minY = DIVIDER_BOTTOM + session.puck.radius;
+        maxY = RAIL_BOTTOM - session.puck.radius;
+      } else {
+        // Top player
+        minY = RAIL_TOP + session.puck.radius;
+        maxY = DIVIDER_TOP - session.puck.radius;
+      }
+      session.currentX = Math.max(minX, Math.min(maxX, session.currentX));
+      session.currentY = Math.max(minY, Math.min(maxY, session.currentY));
+
+      dx = session.currentX - session.anchorX;
+      dy = session.currentY - session.anchorY;
+      dist = Math.hypot(dx, dy);
+
+      session.dragDistance = dist;
+      session.pullVector = { x: dx, y: dy };
+
+      session.puck.x = session.currentX;
+      session.puck.y = session.currentY;
+
+      sound.startTensionHum(dist / MAX_DRAG_DISTANCE);
+
+      // In P2P Client mode, transmit dragUpdate packet
+      if (State.mode === 'p2p-client' && P2P.conn) {
+        P2P.send({
+          type: 'dragUpdate',
+          puckId: session.puck.id,
+          curX: session.currentX,
+          curY: session.currentY,
+          dist
+        });
+      }
+    }
+
+    function handlePointerUp(e) {
+      const session = State.activePointers.get(e.pointerId);
+      if (!session) return;
+
+      const puck = session.puck;
+      const pull = session.pullVector;
+      const dist = session.dragDistance;
+
+      puck.draggedByPointerId = null;
+      State.activePointers.delete(e.pointerId);
+
+      // In P2P Client mode, notify host of release
+      if (State.mode === 'p2p-client' && P2P.conn) {
+        P2P.send({
+          type: 'dragRelease',
+          puckId: puck.id,
+          dist,
+          pullX: pull.x,
+          pullY: pull.y
+        });
+        sound.playSnap();
+        sound.stopTensionHum();
+        return;
+      }
+
+      // Authoritative launch resolution (Local or Host)
+      if (dist > 8) {
+        const impulseMag = dist * LAUNCH_POWER;
+        const normX = -pull.x / dist;
+        const normY = -pull.y / dist;
+
+        puck.vx = normX * impulseMag;
+        puck.vy = normY * impulseMag;
+        puck.state = 'live';
+
+        sound.playSnap();
+      } else {
+        puck.x = session.anchorX;
+        puck.y = session.anchorY;
+        puck.vx = 0;
+        puck.vy = 0;
+        puck.state = 'idle';
+        sound.stopTensionHum();
+      }
+
+      if (State.activePointers.size === 0) {
+        sound.stopTensionHum();
+      }
+    }
+
+    // --- PEERJS ONLINE P2P SUBSYSTEM ---
+    const P2P_PREFIX = 'timber-strike-';
+    const P2P = {
+      peer: null,
+      conn: null,
+      currentRoomCode: '',
+      snapshotTimer: null,
+
+      initPeer(onReady) {
+        if (this.peer && !this.peer.destroyed) {
+          if (onReady) onReady();
+          return;
+        }
+
+        this.updateStatus('connecting', 'Connecting to PeerJS signaling server...');
+
+        // Create Peer with public STUN servers
+        this.peer = new Peer(undefined, {
+          config: {
+            iceServers: [
+              { urls: 'stun:stun.l.google.com:19302' },
+              { urls: 'stun:global.stun.twilio.com:3478' }
+            ]
+          }
+        });
+
+        this.peer.on('open', (id) => {
+          this.updateStatus('active', 'PeerJS online.');
+          if (onReady) onReady();
+        });
+
+        this.peer.on('error', (err) => {
+          console.error('PeerJS error:', err);
+          this.updateStatus('error', `Connection error: ${err.type || 'Unknown'}`);
+        });
+
+        this.peer.on('disconnected', () => {
+          this.updateStatus('connecting', 'Signaling disconnected. Reconnecting...');
+          if (this.peer && !this.peer.destroyed) {
+            this.peer.reconnect();
+          }
+        });
+      },
+
+      hostRoom(code) {
+        const peerId = P2P_PREFIX + code.toUpperCase();
+        this.currentRoomCode = code.toUpperCase();
+
+        if (this.peer && !this.peer.destroyed) {
+          this.peer.destroy();
+        }
+
+        this.updateStatus('connecting', `Registering room ${this.currentRoomCode}...`);
+
+        this.peer = new Peer(peerId, {
+          config: {
+            iceServers: [
+              { urls: 'stun:stun.l.google.com:19302' },
+              { urls: 'stun:global.stun.twilio.com:3478' }
+            ]
+          }
+        });
+
+        this.peer.on('open', () => {
+          this.updateStatus('connecting', `Room ${this.currentRoomCode} ready. Waiting for Player 2...`);
+          document.getElementById('p2p-room-code').textContent = this.currentRoomCode;
+        });
+
+        this.peer.on('connection', (conn) => {
+          this.setupConnection(conn, true);
+        });
+
+        this.peer.on('error', (err) => {
+          if (err.type === 'unavailable-id') {
+            this.updateStatus('connecting', `Room code occupied. Generating fresh code...`);
+            const fresh = generateRandom4LetterCode();
+            this.hostRoom(fresh);
+          } else {
+            this.updateStatus('error', `Host error: ${err.message || err.type}`);
+          }
+        });
+      },
+
+      joinRoom(code) {
+        const targetPeerId = P2P_PREFIX + code.toUpperCase();
+        this.currentRoomCode = code.toUpperCase();
+
+        this.initPeer(() => {
+          this.updateStatus('connecting', `Connecting to Room ${this.currentRoomCode}...`);
+          const conn = this.peer.connect(targetPeerId, {
+            reliable: true
+          });
+          this.setupConnection(conn, false);
+        });
+      },
+
+      setupConnection(conn, isHost) {
+        this.conn = conn;
+
+        conn.on('open', () => {
+          State.mode = isHost ? 'p2p-host' : 'p2p-client';
+          State.myPlayerId = isHost ? 1 : 2; // Host is Player 1 (Ivory, Bottom); Client is Player 2 (Charcoal)
+          setBoardRotation(isHost ? 0 : 180);
+
+          this.updateStatus('active', `Connected! Starting match as ${isHost ? 'Player 1 (Ivory)' : 'Player 2 (Charcoal)'}...`);
+
+          // Hide overlays & start match
+          document.getElementById('modal-p2p').classList.remove('active');
+          document.getElementById('modal-menu').classList.remove('active');
+
+          initPucks();
+
+          if (isHost) {
+            // Start authoritative 30 fps snapshot broadcast loop
+            this.startAuthoritativeLoop();
+          }
+        });
+
+        conn.on('data', (data) => {
+          this.handleIncomingData(data, isHost);
+        });
+
+        conn.on('close', () => {
+          this.handleDisconnect();
+        });
+
+        conn.on('error', (err) => {
+          console.error('DataConnection error:', err);
+          this.handleDisconnect();
+        });
+      },
+
+      // Fixed 30 FPS Authoritative Host Snapshot Broadcast (~33.33ms)
+      startAuthoritativeLoop() {
+        if (this.snapshotTimer) clearInterval(this.snapshotTimer);
+        this.snapshotTimer = setInterval(() => {
+          if (State.mode !== 'p2p-host' || !this.conn || !State.gameActive) return;
+
+          const snapshot = {
+            type: 'snapshot',
+            timestamp: performance.now(),
+            pucks: State.pucks.map(p => ({
+              id: p.id,
+              x: Math.round(p.x * 10) / 10,
+              y: Math.round(p.y * 10) / 10,
+              vx: Math.round(p.vx * 100) / 100,
+              vy: Math.round(p.vy * 100) / 100,
+              state: p.state
+            }))
+          };
+
+          this.send(snapshot);
+        }, 1000 / 30);
+      },
+
+      handleIncomingData(data, isHost) {
+        if (!data || !data.type) return;
+
+        if (isHost) {
+          // HOST RECEIVES CLIENT INPUT PACKETS:
+          if (data.type === 'dragStart') {
+            const p = State.pucks.find(puck => puck.id === data.puckId);
+            if (p && p.isDraggable(2)) {
+              p.draggedByPointerId = 'remote_p2';
+              p.anchorX = p.x;
+              p.anchorY = p.y;
+              State.remoteAim = {
+                puckId: p.id,
+                anchorX: p.x,
+                anchorY: p.y,
+                curX: data.ptX,
+                curY: data.ptY,
+                dist: 0
+              };
+            }
+          } else if (data.type === 'dragUpdate') {
+            const p = State.pucks.find(puck => puck.id === data.puckId);
+            if (p && p.draggedByPointerId === 'remote_p2') {
+              p.x = data.curX;
+              p.y = data.curY;
+              State.remoteAim = {
+                puckId: p.id,
+                anchorX: p.anchorX,
+                anchorY: p.anchorY,
+                curX: data.curX,
+                curY: data.curY,
+                dist: data.dist
+              };
+            }
+          } else if (data.type === 'dragRelease') {
+            const p = State.pucks.find(puck => puck.id === data.puckId);
+            if (p && p.draggedByPointerId === 'remote_p2') {
+              p.draggedByPointerId = null;
+              State.remoteAim = null;
+
+              if (data.dist > 8) {
+                const impulseMag = data.dist * LAUNCH_POWER;
+                const normX = -data.pullX / data.dist;
+                const normY = -data.pullY / data.dist;
+
+                p.vx = normX * impulseMag;
+                p.vy = normY * impulseMag;
+                p.state = 'live';
+
+                sound.playSnap();
+              } else {
+                p.x = p.anchorX;
+                p.y = p.anchorY;
+                p.vx = 0;
+                p.vy = 0;
+                p.state = 'idle';
+              }
+            }
+          } else if (data.type === 'rematchRequest') {
+            initPucks();
+            document.getElementById('modal-victory').classList.remove('active');
+            this.send({ type: 'rematchSync' });
+          }
+        } else {
+          // CLIENT RECEIVES HOST SNAPSHOTS & EVENTS:
+          if (data.type === 'snapshot') {
+            const now = performance.now();
+            const prev = ClientInterpolation.prevSnapTime || now;
+            ClientInterpolation.snapshotDuration = Math.max(now - prev, 20);
+            ClientInterpolation.prevSnapTime = now;
+
+            // Sync puck list & update interpolation targets
+            data.pucks.forEach(sp => {
+              let puck = State.pucks.find(p => p.id === sp.id);
+              if (!puck) {
+                const owner = sp.id.startsWith('p1') ? 1 : 2;
+                puck = new Puck(sp.id, owner, sp.x, sp.y);
+                State.pucks.push(puck);
+              }
+
+              puck.vx = sp.vx;
+              puck.vy = sp.vy;
+              puck.state = sp.state;
+
+              // Store previous position as start, host pos as target for smooth 33ms lerp
+              if (puck.draggedByPointerId === null) {
+                ClientInterpolation.snapshots.set(puck.id, {
+                  startX: puck.x,
+                  startY: puck.y,
+                  targetX: sp.x,
+                  targetY: sp.y,
+                  lastReceivedTime: now
+                });
+              }
+            });
+
+            // Remove scored pucks that host removed
+            State.pucks = State.pucks.filter(p => data.pucks.some(sp => sp.id === p.id));
+            updateHUD();
+          } else if (data.type === 'goal') {
+            sound.playScoreChime();
+            spawnGoalBurst(data.puckX, data.puckY, data.scoringPlayer === 1 ? '#fef08a' : '#d1d5db');
+            updateHUD();
+          } else if (data.type === 'victory') {
+            triggerVictory(data.winnerId);
+          } else if (data.type === 'rematchSync') {
+            initPucks();
+            document.getElementById('modal-victory').classList.remove('active');
+          }
+        }
+      },
+
+      handleDisconnect() {
+        if (State.mode === 'p2p-host' || State.mode === 'p2p-client') {
+          State.gameActive = false;
+          if (this.snapshotTimer) clearInterval(this.snapshotTimer);
+          document.getElementById('modal-disconnect').classList.add('active');
+          this.updateStatus('error', 'Peer connection disconnected.');
+        }
+      },
+
+      send(payload) {
+        if (this.conn && this.conn.open) {
+          try {
+            this.conn.send(payload);
+          } catch (e) {
+            console.warn('Send packet failed:', e);
+          }
+        }
+      },
+
+      updateStatus(dotClass, text) {
+        const dot = document.getElementById('p2p-modal-dot');
+        const status = document.getElementById('p2p-modal-status');
+        if (dot) dot.className = `status-dot ${dotClass}`;
+        if (status) status.textContent = text;
+      }
+    };
+
+    function generateRandom4LetterCode() {
+      const words = ['WOOD', 'PINE', 'PUCK', 'SLUG', 'SLAM', 'BARK', 'OAKY', 'CHIP', 'DASH', 'BEAM', 'POST', 'BOLT'];
+      return words[Math.floor(Math.random() * words.length)];
+    }
+
+    // --- CANVAS RENDERING PIPELINE & PERSPECTIVE CORRECTION ---
+    function renderBoard() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      ctx.save();
+
+      // DYNAMIC BOARD ROTATION & PERSPECTIVE CORRECTION:
+      // Supports 0° Portrait, 90° Landscape, 180° Portrait, and 270° Landscape.
+      // Transforms the rendering so players can play horizontally or vertically.
+      if (State.boardRotation === 90) {
+        ctx.translate(1200, 0);
+        ctx.rotate(Math.PI / 2);
+      } else if (State.boardRotation === 180) {
+        ctx.translate(600, 1200);
+        ctx.rotate(Math.PI);
+      } else if (State.boardRotation === 270) {
+        ctx.translate(0, 600);
+        ctx.rotate(-Math.PI / 2);
+      }
+
+      // 1. Sanded Maple Wood Table Bed
+      const bedGrad = ctx.createRadialGradient(
+        BOARD_WIDTH * 0.5, BOARD_HEIGHT * 0.5, 80,
+        BOARD_WIDTH * 0.5, BOARD_HEIGHT * 0.5, 750
+      );
+      bedGrad.addColorStop(0, '#ebd5b8');
+      bedGrad.addColorStop(0.65, '#dfc299');
+      bedGrad.addColorStop(1, '#cb9f6e');
+
+      ctx.fillStyle = bedGrad;
+      ctx.fillRect(0, 0, BOARD_WIDTH, BOARD_HEIGHT);
+
+      // Fine wood grain lines
+      ctx.save();
+      ctx.strokeStyle = 'rgba(102, 60, 24, 0.055)';
+      ctx.lineWidth = 1;
+      for (let y = 10; y < BOARD_HEIGHT; y += 14) {
+        ctx.beginPath();
+        ctx.moveTo(RAIL_LEFT, y);
+        const wave = Math.sin(y * 0.04) * 8 + Math.cos(y * 0.015) * 12;
+        ctx.quadraticCurveTo(BOARD_WIDTH * 0.5 + wave, y + (y % 6) - 3, RAIL_RIGHT, y);
+        ctx.stroke();
+      }
+      ctx.restore();
+
+      // 2. Thick Raw-Pine Outer Bezel Frame
+      ctx.save();
+      ctx.fillStyle = '#996738';
+      ctx.fillRect(0, 0, BEZEL_THICKNESS, BOARD_HEIGHT); // Left
+      ctx.fillRect(RAIL_RIGHT, 0, BEZEL_THICKNESS, BOARD_HEIGHT); // Right
+      ctx.fillRect(0, 0, BOARD_WIDTH, BEZEL_THICKNESS); // Top
+      ctx.fillRect(0, RAIL_BOTTOM, BOARD_WIDTH, BEZEL_THICKNESS); // Bottom
+
+      // Inner bevel shadow on wood bed
+      ctx.strokeStyle = 'rgba(40, 16, 4, 0.45)';
+      ctx.lineWidth = 4;
+      ctx.strokeRect(RAIL_LEFT + 2, RAIL_TOP + 2, RAIL_RIGHT - RAIL_LEFT - 4, RAIL_BOTTOM - RAIL_TOP - 4);
+
+      // Outer bezel edge highlight
+      ctx.strokeStyle = '#cb9868';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(1, 1, BOARD_WIDTH - 2, BOARD_HEIGHT - 2);
+      ctx.restore();
+
+      // 3. Lane Guide Markings
+      // 4 thin, low-opacity dark-brown horizontal lane guides evenly spaced per half
+      ctx.save();
+      ctx.strokeStyle = 'rgba(74, 44, 18, 0.18)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([8, 8]);
+
+      // Top Half guides
+      [120, 240, 360, 480].forEach(y => {
+        ctx.beginPath();
+        ctx.moveTo(RAIL_LEFT + 15, y);
+        ctx.lineTo(RAIL_RIGHT - 15, y);
+        ctx.stroke();
+      });
+
+      // Bottom Half guides
+      [720, 840, 960, 1080].forEach(y => {
+        ctx.beginPath();
+        ctx.moveTo(RAIL_LEFT + 15, y);
+        ctx.lineTo(RAIL_RIGHT - 15, y);
+        ctx.stroke();
+      });
+      ctx.restore();
+
+      // 4. Center Wooden Divider with Central Slot Opening
+      renderCenterDivider();
+
+      // 5. Authentic "SUPER PLAYER" Crest Emblems on each half
+      // Top half rotated 180 degrees so Player 2 sees it right-side up
+      renderSuperPlayerLogo(BOARD_WIDTH * 0.5, 360, Math.PI);
+      // Bottom half for Player 1
+      renderSuperPlayerLogo(BOARD_WIDTH * 0.5, 840, 0);
+
+      // 6. Slingshots & Dynamic Elastic Cords
+      renderSlingshots();
+
+      // 7. Pucks (10 total - 5 Charcoal, 5 Ivory)
+      renderPucks();
+
+      // 8. Particles & Confetti
+      renderParticles();
+      renderConfetti();
+
+      // 9. Real-time Half Puck Counters
+      renderHUDCounters();
+
+      ctx.restore(); // Restore perspective transform
+    }
+
+    // --- CENTER WOODEN DIVIDER & CENTRAL SLOT GATE ---
+    function renderCenterDivider() {
+      ctx.save();
+
+      // 1. Drop shadow cast by the thick wooden divider onto table bed
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.32)';
+      ctx.fillRect(0, DIVIDER_TOP + 5, GATE_LEFT, DIVIDER_THICKNESS + 8);
+      ctx.fillRect(GATE_RIGHT, DIVIDER_TOP + 5, BOARD_WIDTH - GATE_RIGHT, DIVIDER_THICKNESS + 8);
+
+      // 2. Left Wooden Divider Beam [0 to GATE_LEFT] (fully embedded into side bezel)
+      const beamGrad = ctx.createLinearGradient(0, DIVIDER_TOP, 0, DIVIDER_BOTTOM);
+      beamGrad.addColorStop(0, '#583112');
+      beamGrad.addColorStop(0.35, '#78441f');
+      beamGrad.addColorStop(0.7, '#633515');
+      beamGrad.addColorStop(1, '#3a1b07');
+
+      ctx.fillStyle = beamGrad;
+      ctx.fillRect(0, DIVIDER_TOP, GATE_LEFT, DIVIDER_THICKNESS);
+
+      // 3. Right Wooden Divider Beam [GATE_RIGHT to BOARD_WIDTH] (fully embedded into side bezel)
+      ctx.fillRect(GATE_RIGHT, DIVIDER_TOP, BOARD_WIDTH - GATE_RIGHT, DIVIDER_THICKNESS);
+
+      // 4. Top Bevel Edge Highlight (3D depth)
+      ctx.strokeStyle = '#a26639';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(RAIL_LEFT, DIVIDER_TOP + 1);
+      ctx.lineTo(GATE_LEFT, DIVIDER_TOP + 1);
+      ctx.moveTo(GATE_RIGHT, DIVIDER_TOP + 1);
+      ctx.lineTo(RAIL_RIGHT, DIVIDER_TOP + 1);
+      ctx.stroke();
+
+      // Bottom Bevel Shadow
+      ctx.strokeStyle = '#220f04';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(RAIL_LEFT, DIVIDER_BOTTOM - 1);
+      ctx.lineTo(GATE_LEFT, DIVIDER_BOTTOM - 1);
+      ctx.moveTo(GATE_RIGHT, DIVIDER_BOTTOM - 1);
+      ctx.lineTo(RAIL_RIGHT, DIVIDER_BOTTOM - 1);
+      ctx.stroke();
+
+      // 5. Rounded Gate Post Caps at the opening
+      [GATE_LEFT, GATE_RIGHT].forEach(px => {
+        // Shadow
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+        ctx.beginPath();
+        ctx.arc(px, DIVIDER_Y + 2.5, GATE_POST_RADIUS, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Polished Metallic Brass / Hardwood Post
+        const capGrad = ctx.createRadialGradient(px - 3, DIVIDER_Y - 3, 1, px, DIVIDER_Y, GATE_POST_RADIUS);
+        capGrad.addColorStop(0, '#fef08a');
+        capGrad.addColorStop(0.4, '#d97706');
+        capGrad.addColorStop(1, '#451a03');
+
+        ctx.fillStyle = capGrad;
+        ctx.beginPath();
+        ctx.arc(px, DIVIDER_Y, GATE_POST_RADIUS, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = '#78350f';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      });
+
+      // 6. Fastener Screws along the beams
+      [75, 160, 440, 525].forEach(sx => {
+        ctx.fillStyle = '#d4a373';
+        ctx.beginPath();
+        ctx.arc(sx, DIVIDER_Y, 3.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = '#3a1b07';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(sx - 2.5, DIVIDER_Y);
+        ctx.lineTo(sx + 2.5, DIVIDER_Y);
+        ctx.stroke();
+      });
+
+      // 7. Gate slot floor guide mark
+      ctx.strokeStyle = 'rgba(120, 53, 15, 0.3)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(GATE_LEFT, DIVIDER_Y);
+      ctx.lineTo(GATE_RIGHT, DIVIDER_Y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.restore();
+    }
+
+    // --- AUTHENTIC "SUPER PLAYER" CREST EMBLEM ---
+    function renderSuperPlayerLogo(centerX, centerY, angle) {
+      ctx.save();
+      ctx.translate(centerX, centerY);
+      ctx.rotate(angle);
+
+      // Outer badge shadow
+      ctx.shadowColor = 'rgba(60, 30, 10, 0.35)';
+      ctx.shadowBlur = 6;
+      ctx.shadowOffsetY = 3;
+
+      // 1. Oval Base Medallion
+      ctx.fillStyle = 'rgba(236, 218, 192, 0.88)';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 115, 62, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Outer crimson accent border
+      ctx.strokeStyle = '#991b1b';
+      ctx.lineWidth = 3.5;
+      ctx.stroke();
+
+      // Inner golden decorative ring
+      ctx.strokeStyle = '#d97706';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 107, 54, 0, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.shadowColor = 'transparent';
+
+      // 2. Red Center Banner for "SUPER"
+      ctx.fillStyle = '#b91c1c';
+      ctx.beginPath();
+      ctx.moveTo(-75, -28);
+      ctx.quadraticCurveTo(0, -36, 75, -28);
+      ctx.lineTo(82, -8);
+      ctx.quadraticCurveTo(0, -14, -82, -8);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.strokeStyle = '#fef08a';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // "SUPER" lettering
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '900 17px "Impact", "Arial Black", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.letterSpacing = '2px';
+      ctx.fillText('SUPER', 0, -19);
+
+      // 3. Large Bold "PLAYER" lettering
+      ctx.fillStyle = '#78350f';
+      ctx.font = '900 29px "Arial Black", "Impact", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.letterSpacing = '1.5px';
+      ctx.fillText('PLAYER', 0, 14);
+
+      // 4. Decorative stars on sides
+      ctx.fillStyle = '#b45309';
+      ctx.font = '12px sans-serif';
+      ctx.fillText('★', -85, 14);
+      ctx.fillText('★', 85, 14);
+
+      // 5. Subtle horizontal decorative divider line
+      ctx.strokeStyle = 'rgba(120, 53, 15, 0.4)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(-50, 33);
+      ctx.lineTo(50, 33);
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    // --- SLINGSHOTS & DYNAMIC ELASTIC CORDS ---
+    function renderSlingshots() {
+      ctx.save();
+
+      // --- A. Bottom Slingshot ---
+      renderBandAnchor(RAIL_LEFT, BAND_BOTTOM_Y);
+      renderBandAnchor(RAIL_RIGHT, BAND_BOTTOM_Y);
+
+      // Check if Bottom player is dragging
+      let botDrag = null;
+      State.activePointers.forEach(s => {
+        if (s.puck.y > DIVIDER_Y) botDrag = s;
+      });
+
+      ctx.strokeStyle = '#18181b'; // Tough vulcanized rubber cord
+      ctx.lineWidth = 5;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
+      ctx.shadowBlur = 4;
+      ctx.shadowOffsetY = 2;
+
+      ctx.beginPath();
+      ctx.moveTo(RAIL_LEFT, BAND_BOTTOM_Y);
+      if (botDrag) {
+        ctx.lineTo(botDrag.currentX, botDrag.currentY + botDrag.puck.radius * 0.55);
+      }
+      ctx.lineTo(RAIL_RIGHT, BAND_BOTTOM_Y);
+      ctx.stroke();
+
+      // --- B. Top Slingshot ---
+      renderBandAnchor(RAIL_LEFT, BAND_TOP_Y);
+      renderBandAnchor(RAIL_RIGHT, BAND_TOP_Y);
+
+      let topDrag = null;
+      State.activePointers.forEach(s => {
+        if (s.puck.y < DIVIDER_Y) topDrag = s;
+      });
+
+      ctx.beginPath();
+      ctx.moveTo(RAIL_LEFT, BAND_TOP_Y);
+      if (topDrag) {
+        ctx.lineTo(topDrag.currentX, topDrag.currentY - topDrag.puck.radius * 0.55);
+      } else if (State.remoteAim && State.remoteAim.curY < DIVIDER_Y) {
+        ctx.lineTo(State.remoteAim.curX, State.remoteAim.curY - PUCK_RADIUS * 0.55);
+      }
+      ctx.lineTo(RAIL_RIGHT, BAND_TOP_Y);
+      ctx.stroke();
+
+      ctx.restore();
+
+      // --- C. Aiming trajectory previews while dragging ---
+      State.activePointers.forEach(session => {
+        const p = session.puck;
+        const dist = session.dragDistance;
+        if (dist < 6) return;
+
+        ctx.save();
+        const normX = -session.pullVector.x / dist;
+        const normY = -session.pullVector.y / dist;
+        const trajLen = Math.min(dist * 2.6, 300);
+
+        ctx.strokeStyle = p.color === 'ivory' ? 'rgba(254, 240, 138, 0.8)' : 'rgba(55, 65, 81, 0.8)';
+        ctx.lineWidth = 2.5;
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath();
+        ctx.moveTo(session.anchorX, session.anchorY);
+        ctx.lineTo(session.anchorX + normX * trajLen, session.anchorY + normY * trajLen);
+        ctx.stroke();
+
+        // Aim tip
+        ctx.setLineDash([]);
+        ctx.fillStyle = ctx.strokeStyle;
+        ctx.beginPath();
+        ctx.arc(session.anchorX + normX * trajLen, session.anchorY + normY * trajLen, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+      });
+    }
+
+    function renderBandAnchor(x, y) {
+      // Brass post mounted directly into the side rail
+      ctx.save();
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+      ctx.beginPath();
+      ctx.arc(x, y + 2, 7, 0, Math.PI * 2);
+      ctx.fill();
+
+      const postGrad = ctx.createRadialGradient(x - 2, y - 2, 1, x, y, 7);
+      postGrad.addColorStop(0, '#fef08a');
+      postGrad.addColorStop(0.5, '#b45309');
+      postGrad.addColorStop(1, '#451a03');
+
+      ctx.fillStyle = postGrad;
+      ctx.beginPath();
+      ctx.arc(x, y, 6.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = '#451a03';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // --- PUCKS RENDERING ---
+    function renderPucks() {
+      for (let p of State.pucks) {
+        ctx.save();
+
+        // Dynamic drop shadow for authentic depth
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.38)';
+        ctx.beginPath();
+        ctx.arc(p.x + 3.5, p.y + 4.5, p.radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        if (p.color === 'ivory') {
+          // Player 1 (Ivory / Maple Hardwood Puck)
+          const ivoryGrad = ctx.createRadialGradient(
+            p.x - p.radius * 0.35, p.y - p.radius * 0.35, 2,
+            p.x, p.y, p.radius
+          );
+          ivoryGrad.addColorStop(0, '#ffffff');
+          ivoryGrad.addColorStop(0.35, '#faf5ea');
+          ivoryGrad.addColorStop(0.85, '#e4d5be');
+          ivoryGrad.addColorStop(1, '#a88f72');
+
+          ctx.fillStyle = ivoryGrad;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Concentric inner turned wood groove
+          ctx.strokeStyle = 'rgba(120, 95, 65, 0.45)';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.radius * 0.65, 0, Math.PI * 2);
+          ctx.stroke();
+
+          // Outer beveled edge ring
+          ctx.strokeStyle = '#8c6b48';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+
+          // Center brass pip
+          ctx.fillStyle = '#b4946e';
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          // Player 2 (Charcoal / Ebony Hardwood Puck)
+          const charcoalGrad = ctx.createRadialGradient(
+            p.x - p.radius * 0.35, p.y - p.radius * 0.35, 2,
+            p.x, p.y, p.radius
+          );
+          charcoalGrad.addColorStop(0, '#52525b');
+          charcoalGrad.addColorStop(0.4, '#27272a');
+          charcoalGrad.addColorStop(0.9, '#18181b');
+          charcoalGrad.addColorStop(1, '#09090b');
+
+          ctx.fillStyle = charcoalGrad;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Concentric inner groove
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.radius * 0.65, 0, Math.PI * 2);
+          ctx.stroke();
+
+          // Outer rim
+          ctx.strokeStyle = '#3f3f46';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+
+          // Center pip
+          ctx.fillStyle = '#71717a';
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // Draggable indicator ring
+        const allowedPlayers = State.mode === 'local' ? [1, 2] : [State.myPlayerId];
+        const canDrag = allowedPlayers.some(ply => p.isDraggable(ply));
+        if (canDrag && p.draggedByPointerId === null) {
+          ctx.strokeStyle = p.color === 'ivory' ? 'rgba(254, 240, 138, 0.55)' : 'rgba(147, 197, 253, 0.55)';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([3, 3]);
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.radius + 3, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+
+        ctx.restore();
+      }
+    }
+
+    function renderParticles() {
+      for (let pt of State.particles) {
+        ctx.save();
+        if (pt.type === 'spark') {
+          ctx.fillStyle = pt.color;
+          ctx.globalAlpha = Math.max(pt.life, 0);
+          ctx.beginPath();
+          ctx.arc(pt.x, pt.y, pt.radius, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (pt.type === 'ring') {
+          ctx.strokeStyle = pt.color;
+          ctx.lineWidth = 3;
+          ctx.globalAlpha = Math.max(pt.life, 0);
+          ctx.beginPath();
+          ctx.arc(pt.x, pt.y, pt.radius, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+    }
+
+    function renderConfetti() {
+      for (let c of State.confetti) {
+        ctx.save();
+        ctx.translate(c.x, c.y);
+        ctx.rotate(c.rotation);
+        ctx.fillStyle = c.color;
+        ctx.fillRect(-c.size * 0.5, -c.size * 0.5, c.size, c.size * 0.6);
+        ctx.restore();
+      }
+    }
+
+    function renderHUDCounters() {
+      const topCount = State.pucks.filter(p => p.y < DIVIDER_Y).length;
+      const bottomCount = State.pucks.filter(p => p.y > DIVIDER_Y).length;
+
+      ctx.save();
+      ctx.font = 'bold 13px system-ui, sans-serif';
+      ctx.letterSpacing = '1px';
+
+      // Top Half Indicator (Player 2)
+      ctx.fillStyle = 'rgba(24, 24, 27, 0.72)';
+      ctx.fillRect(RAIL_LEFT + 12, RAIL_TOP + 12, 115, 26);
+      ctx.strokeStyle = '#52525b';
+      ctx.strokeRect(RAIL_LEFT + 12, RAIL_TOP + 12, 115, 26);
+      ctx.fillStyle = '#e4e4e7';
+      ctx.fillText(`TOP: ${topCount} PUCKS`, RAIL_LEFT + 20, RAIL_TOP + 29);
+
+      // Bottom Half Indicator (Player 1)
+      ctx.fillStyle = 'rgba(244, 237, 226, 0.85)';
+      ctx.fillRect(RAIL_RIGHT - 132, RAIL_BOTTOM - 38, 120, 26);
+      ctx.strokeStyle = '#9c7b5b';
+      ctx.strokeRect(RAIL_RIGHT - 132, RAIL_BOTTOM - 38, 120, 26);
+      ctx.fillStyle = '#23170e';
+      ctx.fillText(`BOTTOM: ${bottomCount} PUCKS`, RAIL_RIGHT - 124, RAIL_BOTTOM - 21);
+
+      ctx.restore();
+    }
+
+    // --- MAIN GAME LOOP ---
+    function gameLoop() {
+      stepPhysics();
+      renderBoard();
+      requestAnimationFrame(gameLoop);
+    }
+
+    // --- UI EVENT HANDLERS ---
+    document.getElementById('btn-start-local').addEventListener('click', () => {
+      State.mode = 'local';
+      State.myPlayerId = 1;
+      document.getElementById('modal-menu').classList.remove('active');
+      initPucks();
+    });
+
+    document.getElementById('btn-open-p2p').addEventListener('click', () => {
+      document.getElementById('modal-menu').classList.remove('active');
+      document.getElementById('modal-p2p').classList.add('active');
+
+      const roomCode = generateRandom4LetterCode();
+      P2P.hostRoom(roomCode);
+    });
+
+    document.getElementById('btn-join-room').addEventListener('click', () => {
+      const input = document.getElementById('input-join-code');
+      const code = input.value.trim().toUpperCase();
+      if (code.length === 4) {
+        P2P.joinRoom(code);
+      } else {
+        alert('Please enter a valid 4-character room code (e.g. WOOD).');
+      }
+    });
+
+    document.getElementById('btn-copy-code').addEventListener('click', () => {
+      const code = document.getElementById('p2p-room-code').textContent;
+      navigator.clipboard.writeText(code).then(() => {
+        const btn = document.getElementById('btn-copy-code');
+        btn.style.borderColor = '#4ade80';
+        setTimeout(() => { btn.style.borderColor = ''; }, 1000);
+      });
+    });
+
+    document.getElementById('btn-back-menu').addEventListener('click', () => {
+      document.getElementById('modal-p2p').classList.remove('active');
+      document.getElementById('modal-menu').classList.add('active');
+    });
+
+    document.getElementById('btn-disconnect-menu').addEventListener('click', () => {
+      document.getElementById('modal-disconnect').classList.remove('active');
+      document.getElementById('modal-menu').classList.add('active');
+    });
+
+    document.getElementById('btn-menu-toggle').addEventListener('click', () => {
+      const menu = document.getElementById('modal-menu');
+      if (menu.classList.contains('active')) {
+        menu.classList.remove('active');
+      } else {
+        menu.classList.add('active');
+      }
+    });
+
+    document.getElementById('btn-resume-game').addEventListener('click', () => {
+      document.getElementById('modal-menu').classList.remove('active');
+    });
+
+    document.getElementById('btn-rematch').addEventListener('click', () => {
+      document.getElementById('modal-victory').classList.remove('active');
+      if (State.mode === 'p2p-client') {
+        P2P.send({ type: 'rematchRequest' });
+      } else if (State.mode === 'p2p-host') {
+        initPucks();
+        P2P.send({ type: 'rematchSync' });
+      } else {
+        initPucks();
+      }
+    });
+
+    document.getElementById('btn-victory-menu').addEventListener('click', () => {
+      document.getElementById('modal-victory').classList.remove('active');
+      document.getElementById('modal-menu').classList.add('active');
+    });
+
+    // Sound toggle
+    const btnSound = document.getElementById('btn-sound-toggle');
+    const iconSoundOn = document.getElementById('icon-sound-on');
+    const iconSoundOff = document.getElementById('icon-sound-off');
+
+    btnSound.addEventListener('click', () => {
+      State.isMuted = !State.isMuted;
+      if (State.isMuted) {
+        iconSoundOn.style.display = 'none';
+        iconSoundOff.style.display = 'block';
+        sound.stopTensionHum();
+      } else {
+        iconSoundOn.style.display = 'block';
+        iconSoundOff.style.display = 'none';
+        sound.init();
+      }
+    });
+
+    // Rotate board button in HUD
+    const btnRotate = document.getElementById('btn-rotate-board');
+    if (btnRotate) {
+      btnRotate.addEventListener('click', () => {
+        setBoardRotation(State.boardRotation + 90);
+      });
+    }
+
+    // Orientation options in Menu
+    const btnOrientPort = document.getElementById('btn-orient-portrait');
+    if (btnOrientPort) {
+      btnOrientPort.addEventListener('click', () => {
+        setBoardRotation(0);
+      });
+    }
+    const btnOrientLand = document.getElementById('btn-orient-landscape');
+    if (btnOrientLand) {
+      btnOrientLand.addEventListener('click', () => {
+        setBoardRotation(90);
+      });
+    }
+    const btnMenuRotate = document.getElementById('btn-menu-rotate');
+    if (btnMenuRotate) {
+      btnMenuRotate.addEventListener('click', () => {
+        setBoardRotation(State.boardRotation + 90);
+      });
+    }
+
+    // Initialize board rotation, pucks, and start game loop
+    setBoardRotation(0);
+    initPucks();
+    requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>
